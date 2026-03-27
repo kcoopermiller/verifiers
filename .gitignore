@@ -10,6 +10,7 @@ uv.lock
 .cursor/
 .ropeproject/
 .scratch/
+.chroma_db/
 
 # artifacts
 core.* 
@@ -27,11 +28,15 @@ docs/build/
 *.pyd
 *.pyc
 
+# libraries
+prime-rl
+
 # outputs
 wandb/
 /outputs/
 reports/
 logs/
+.chroma_db/
 
 # development
 local/
@@ -41,15 +46,8 @@ scratch/
 *.swp
 .DS_Store
 
-# WIPs
-verifiers/envs/multibranch_env.py
-wip/
-old/
+# Node modules
+node_modules/
 
-# Incomplete environments
-environments/aime2024/
-environments/vf_acebench/
-environments/vf_bfcl_v3/
-environments/vf_hotpotqa/
-environments/vf_truthful_qa/
-environments/vf_reverse_text_mini/
+# Browser env generated files
+environments/browser_env/cua-server/node_modules/

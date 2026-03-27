@@ -1,61 +1,49 @@
 # tests/test_environment_audio_modalities.py
-import logging
-import types
-
 import pytest
+from datasets import Dataset
 
-from verifiers.envs.environment import Environment
+import verifiers as vf
+from tests.mock_openai_client import MockOpenAIClient
+from verifiers.envs.singleturn_env import SingleTurnEnv
+from verifiers.types import RolloutInput
 
 DUMMY_B64 = "ZHVtbXk="
 
 
-def _get_client_and_sink():
-    """
-    Prefer repo mock client if available; otherwise use a stub that captures kwargs.
-    Returns (client, get_kwargs_fn).
-    """
-    try:
-        from tests.mock_openai_client import MockOpenAIClient
+class MockClientWithKwargsCapture(MockOpenAIClient):
+    """Mock client that captures kwargs passed to chat.completions.create."""
 
-        mock = MockOpenAIClient()
-        calls = {"kwargs": None}
+    def __init__(self):
+        super().__init__()
+        self._captured_kwargs = None
 
         async def _wrap_create(**kwargs):
-            calls["kwargs"] = kwargs
+            self._captured_kwargs = kwargs
             return {"ok": True}
 
-        mock.chat.completions.create = _wrap_create
+        self.chat.completions.create = _wrap_create
 
-        def _get():
-            return calls["kwargs"]
+    def get_kwargs(self):
+        """Get the captured kwargs from the last create call."""
+        return self._captured_kwargs
 
-        return mock, _get
-    except Exception:
 
-        class _DummyCompletions:
-            def __init__(self):
-                self.kwargs = None
+@pytest.fixture
+def mock_client():
+    return MockClientWithKwargsCapture()
 
-            async def create(self, **kwargs):
-                self.kwargs = kwargs
-                return {"ok": True}
 
-        class _DummyChat:
-            def __init__(self):
-                self.completions = _DummyCompletions()
-
-        class _DummyClient:
-            def __init__(self):
-                self.chat = _DummyChat()
-
-        dummy = _DummyClient()
-        return dummy, lambda: dummy.chat.completions.kwargs
+@pytest.fixture
+def test_environment():
+    dummy_dataset = Dataset.from_dict({"prompt": ["test"]})
+    return SingleTurnEnv(dataset=dummy_dataset, message_type="chat")
 
 
 @pytest.mark.asyncio
-async def test_sets_modalities_text_when_audio_and_missing():
-    client, get_kwargs = _get_client_and_sink()
-    prompt = [
+async def test_sets_modalities_text_when_audio_and_missing(
+    mock_client, test_environment
+):
+    prompt: vf.Messages = [
         {
             "role": "user",
             "content": [
@@ -67,30 +55,24 @@ async def test_sets_modalities_text_when_audio_and_missing():
             ],
         }
     ]
-    fake_self = types.SimpleNamespace(
-        message_type="chat", logger=logging.getLogger("test")
-    )
 
-    await Environment.get_model_response(
-        fake_self,
-        client=client,
+    state = await test_environment.init_state(
+        input=RolloutInput(example_id=0, task="test", prompt=prompt),
+        client=mock_client,
         model="gpt-4o-audio-preview",
-        prompt=prompt,
-        oai_tools=None,
-        sampling_args=None,
-        message_type=None,
     )
 
-    kwargs = get_kwargs()
+    await test_environment.get_model_response(state, prompt)
+
+    kwargs = mock_client.get_kwargs()
     assert kwargs is not None
     assert kwargs.get("modalities") == ["text"]
     assert kwargs.get("messages") == prompt
 
 
 @pytest.mark.asyncio
-async def test_does_not_override_existing_modalities():
-    client, get_kwargs = _get_client_and_sink()
-    prompt = [
+async def test_does_not_override_existing_modalities(mock_client, test_environment):
+    prompt: vf.Messages = [
         {
             "role": "user",
             "content": [
@@ -101,43 +83,30 @@ async def test_does_not_override_existing_modalities():
             ],
         }
     ]
-    fake_self = types.SimpleNamespace(
-        message_type="chat", logger=logging.getLogger("test")
-    )
 
-    await Environment.get_model_response(
-        fake_self,
-        client=client,
+    state = await test_environment.init_state(
+        input=RolloutInput(example_id=0, task="test", prompt=prompt),
+        client=mock_client,
         model="gpt-4o-audio-preview",
-        prompt=prompt,
         sampling_args={"modalities": ["text", "audio"]},
-        oai_tools=None,
-        message_type=None,
     )
+    await test_environment.get_model_response(state, prompt)
 
-    kwargs = get_kwargs()
+    kwargs = mock_client.get_kwargs()
     assert kwargs is not None
     assert kwargs.get("modalities") == ["text", "audio"]
 
 
 @pytest.mark.asyncio
-async def test_does_not_add_modalities_when_no_audio():
-    client, get_kwargs = _get_client_and_sink()
-    prompt = [{"role": "user", "content": "hello"}]
-    fake_self = types.SimpleNamespace(
-        message_type="chat", logger=logging.getLogger("test")
-    )
-
-    await Environment.get_model_response(
-        fake_self,
-        client=client,
+async def test_does_not_add_modalities_when_no_audio(mock_client, test_environment):
+    prompt: vf.Messages = [{"role": "user", "content": "hello"}]
+    state = await test_environment.init_state(
+        input=RolloutInput(example_id=0, task="test", prompt=prompt),
+        client=mock_client,
         model="gpt-4.1-mini",
-        prompt=prompt,
-        sampling_args=None,
-        oai_tools=None,
-        message_type=None,
     )
+    await test_environment.get_model_response(state, prompt)
 
-    kwargs = get_kwargs()
+    kwargs = mock_client.get_kwargs()
     assert kwargs is not None
     assert "modalities" not in kwargs
